@@ -9,8 +9,9 @@ const app = express();
 
 const corsOptions = {
     origin: [
-      'https://sonch.org.in/',  // Your frontend production URL
-      'http://localhost:5173',             // Your local frontend URL (for development)
+      'https://sonch.org.in',
+      'http://localhost:5173',
+      'https://api-sonch.vercel.app'
     ],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'auth-token'],
@@ -45,6 +46,10 @@ const adminSchema = new mongoose.Schema({
 });
 
 const Admin = mongoose.model('Admin', adminSchema);
+
+app.get('/', (req, res) => {
+    res.status(200).json({ message: 'API is running' });
+  });
 
 // Authentication Middleware
 const authenticateToken = (req, res, next) => {
@@ -185,5 +190,5 @@ app.delete('/api/blogs/:id', authenticateToken, async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
