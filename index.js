@@ -9,8 +9,8 @@ const app = express();
 
 const corsOptions = {
     origin: [
-      'https://project-sonch.vercel.app',  // Your frontend production URL
-      'http://localhost:3000',             // Your local frontend URL (for development)
+      'https://sonch.org.in/',  // Your frontend production URL
+      'http://localhost:5173',             // Your local frontend URL (for development)
     ],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'auth-token'],
