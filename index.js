@@ -7,26 +7,43 @@ const jwt = require('jsonwebtoken');
 
 const app = express();
 
-const corsOptions = {
-    origin: [
-      'https://sonch.org.in',
-      'http://localhost:5173',
-      'https://api-sonch.vercel.app'
-    ],
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'auth-token'],
-    exposedHeaders: ['auth-token'],
-    credentials: true
-  };
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', 'https://sonch.org.in', 'http://localhost:5173');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, auth-token');
+    res.header('Access-Control-Expose-Headers', 'auth-token');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    
+    if (req.method === 'OPTIONS') {
+      return res.status(200).json({
+        body: "OK"
+      });
+    }
+    
+    next();
+  });
+  
+  app.use(express.json());
 
-// Middleware
-app.use(cors(corsOptions));
-app.use(express.json());
-
-// MongoDB Connection
-mongoose.connect(process.env.MONGODB_URI)
+  mongoose.connect(process.env.MONGODB_URI, {
+    serverSelectionTimeoutMS: 5000,
+    socketTimeoutMS: 45000,
+  })
   .then(() => console.log('Connected to MongoDB'))
   .catch(err => console.error('MongoDB connection error:', err));
+  
+  // Error handling for MongoDB connection
+  mongoose.connection.on('error', err => {
+    console.error('MongoDB connection error:', err);
+  });
+  
+  mongoose.connection.on('disconnected', () => {
+    console.log('MongoDB disconnected. Attempting to reconnect...');
+  });
+  
+  mongoose.connection.on('reconnected', () => {
+    console.log('MongoDB reconnected');
+  });
 
 // Blog Schema
 const blogSchema = new mongoose.Schema({
@@ -190,5 +207,18 @@ app.delete('/api/blogs/:id', authenticateToken, async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.use((err, req, res, next) => {
+    console.error(err.stack);
+    res.status(500).json({ message: 'Something broke!' });
+  });
+  
+  // Add a timeout handler
+  app.use((req, res, next) => {
+    res.setTimeout(30000, () => {
+      res.status(504).json({ message: 'Request timeout' });
+    });
+    next();
+  });
+  
+  const PORT = process.env.PORT || 4000;
+  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
