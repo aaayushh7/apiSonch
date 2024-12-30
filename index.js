@@ -7,8 +7,19 @@ const jwt = require('jsonwebtoken');
 
 const app = express();
 
+const corsOptions = {
+    origin: [
+      'https://project-sonch.vercel.app',  // Your frontend production URL
+      'http://localhost:3000',             // Your local frontend URL (for development)
+    ],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'auth-token'],
+    exposedHeaders: ['auth-token'],
+    credentials: true
+  };
+
 // Middleware
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // MongoDB Connection
