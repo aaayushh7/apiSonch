@@ -69,11 +69,11 @@ const Blog = mongoose.model('Blog', blogSchema);
 const Admin = mongoose.model('Admin', adminSchema);
 
 // Authentication middleware remains the same
-const authenticateToken = (req, res, next) => {
-  const token = req.header('Authorization')?.split(' ')[1];
-  if (!token) return res.status(401).json({ message: 'Access denied' });
-
+const verifyToken = async (req, res, next) => {
   try {
+    const token = req.header('Authorization')?.replace('Bearer ', '') || req.header('auth-token');
+    if (!token) return res.status(401).json({ message: 'Access denied' });
+
     const verified = jwt.verify(token, process.env.JWT_SECRET);
     req.admin = verified;
     next();
@@ -81,6 +81,8 @@ const authenticateToken = (req, res, next) => {
     res.status(400).json({ message: 'Invalid token' });
   }
 };
+
+const authenticateToken = verifyToken;
 
 // Fixed file upload route
 
@@ -176,6 +178,23 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
+app.post('/api/auth/logout', verifyToken, async (req, res) => {
+  try {
+    // Get the token from the header
+    const token = req.header('auth-token');
+
+    // Optional: Add token to a blacklist in your database
+    // await BlacklistedToken.create({ token });
+    
+    // Clear the auth token from the response header
+    res.removeHeader('auth-token');
+    
+    res.status(200).json({ message: 'Logged out successfully' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // Updated Blog Routes to handle images
 // Get all blogs
 app.get('/api/blogs', async (req, res) => {
@@ -241,23 +260,29 @@ app.put('/api/blogs/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Delete blog
 app.delete('/api/blogs/:id', authenticateToken, async (req, res) => {
   try {
     const blog = await Blog.findById(req.params.id);
     if (!blog) return res.status(404).json({ message: 'Blog not found' });
-    
-    if (blog.author !== req.admin.email) {
+
+    // Make author check case-insensitive
+    if (blog.author.toLowerCase() !== req.admin.email.toLowerCase()) {
+      console.log('Author mismatch:', { blogAuthor: blog.author, userEmail: req.admin.email });
       return res.status(403).json({ message: 'Not authorized to delete this blog' });
     }
 
     if (blog.bannerId) {
-      await gfs.delete(new mongoose.Types.ObjectId(blog.bannerId));
+      try {
+        await gfs.delete(new mongoose.Types.ObjectId(blog.bannerId));
+      } catch (error) {
+        console.error('Error deleting banner:', error);
+      }
     }
 
     await blog.deleteOne();
     res.json({ message: 'Blog deleted' });
   } catch (err) {
+    console.error('Delete error:', err);
     res.status(500).json({ message: err.message });
   }
 });
