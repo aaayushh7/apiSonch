@@ -25,7 +25,7 @@ app.use((req, res, next) => {
   
   app.use(express.json());
 
-  mongoose.connect(process.env.MONGODB_URI, {
+  mongoose.connect("mongodb+srv://secondmailtest834:lL7iH3ydKLmAMXoF@cluster0.duf4b.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0", {
     serverSelectionTimeoutMS: 5000,
     socketTimeoutMS: 45000,
   })
