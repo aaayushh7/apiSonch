@@ -6,6 +6,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const { GridFsStorage } = require('multer-gridfs-storage');
+const sharp = require('sharp');
 const crypto = require('crypto');
 const path = require('path');
 
@@ -13,41 +14,59 @@ const app = express();
 app.use(express.json());
 
 // CORS middleware remains the same as your original code
-app.use((req, res, next) => {
-  const allowedOrigins = ['https://sonch.org.in', 'http://localhost:5173'];
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
-  }
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, auth-token');
-  res.header('Access-Control-Expose-Headers', 'auth-token');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  
-  if (req.method === 'OPTIONS') {
-    return res.status(200).json({ body: "OK" });
-  }
-  next();
-});
+const allowedOrigins = ['https://sonch.org.in', 'http://localhost:5173'];
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  exposedHeaders: ['auth-token'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'auth-token']
+}));
 
-const mongoURI = process.env.MONGO_URI || "mongodb+srv://secondmailtest834:lL7iH3ydKLmAMXoF@cluster0.duf4b.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0";
+mongoose.connect(process.env.MONGO_URI || "mongodb+srv://secondmailtest834:lL7iH3ydKLmAMXoF@cluster0.duf4b.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0");
 
 let gfs;
 
-mongoose.connect(mongoURI)
-  .then(() => {
-    console.log('Connected to MongoDB');
-    gfs = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
-      bucketName: 'uploads'
-    });
-  })
-  .catch(err => console.error('MongoDB connection error:', err));
+mongoose.connection.once('open', () => {
+  console.log("Connected to MongoDB successfully.");
+  gfs = new mongoose.mongo.GridFSBucket(mongoose.connection.db, { bucketName: 'uploads' });
+});
 
-// Use memory storage instead of GridFS storage
+
+// mongoose.connect(mongoURI)
+//   .then(() => {
+//     console.log('Connected to MongoDB');
+//     gfs = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
+//       bucketName: 'uploads'
+//     });
+//   })
+//   .catch(err => console.error('MongoDB connection error:', err));
+
 const storage = multer.memoryStorage();
-const upload = multer({ 
+const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
+  limits: { fileSize: 10 * 1024 * 1024 }, // Increased limit for base64 encoded images
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    
+    // Handle both regular uploads and base64 content
+    if (req.body.base64) {
+      cb(null, true);
+      return;
+    }
+    
+    if (!allowedTypes.includes(file.mimetype)) {
+      cb(new Error('Invalid file type'));
+      return;
+    }
+    cb(null, true);
+  }
 });
 
 // Schema definitions remain the same
@@ -84,47 +103,99 @@ const verifyToken = async (req, res, next) => {
 
 const authenticateToken = verifyToken;
 
+const processImage = async (imageBuffer, options = {}) => {
+  const {
+    maxWidth = 1200,
+    maxHeight = 800,
+    quality = 80,
+    format = 'jpeg'
+  } = options;
+
+  return sharp(imageBuffer)
+    .resize(maxWidth, maxHeight, {
+      fit: 'inside',
+      withoutEnlargement: true
+    })
+    [format]({ quality })
+    .toBuffer();
+};
+
 // Fixed file upload route
 
-app.post('/api/upload', upload.single('file'), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ message: 'No file uploaded' });
-  }
+app.post('/api/upload', upload.single('file'), async (req, res) => {
+  try {
+    let imageBuffer;
+    
+    // Handle base64 uploads (from Quill editor)
+    if (req.body.base64) {
+      const base64Data = req.body.base64.split(';base64,').pop();
+      imageBuffer = Buffer.from(base64Data, 'base64');
+    } 
+    // Handle multipart uploads (from banner upload)
+    else if (req.file) {
+      imageBuffer = req.file.buffer;
+    } else {
+      return res.status(400).json({ message: 'No image data provided' });
+    }
 
-  const filename = crypto.randomBytes(16).toString('hex') + path.extname(req.file.originalname);
-  
-  const uploadStream = gfs.openUploadStream(filename, {
-    metadata: { originalname: req.file.originalname }
-  });
-
-  // Write buffer to GridFS and handle the promise
-  uploadStream.write(req.file.buffer);
-  uploadStream.end();
-
-  // Get the file id from the upload stream
-  const fileId = uploadStream.id;
-
-  // Return after the upload is complete
-  uploadStream.on('finish', () => {
-    return res.json({ 
-      fileId: fileId,
-      filename: filename 
+    // Process the image
+    const optimizedBuffer = await processImage(imageBuffer, {
+      maxWidth: 1200,
+      maxHeight: 800,
+      quality: 80,
+      format: 'jpeg'
     });
-  });
 
-  uploadStream.on('error', (error) => {
-    console.error('Upload error:', error);
-    return res.status(500).json({ message: 'Error uploading file' });
-  });
+    // Generate unique filename
+    const filename = `${crypto.randomBytes(16).toString('hex')}.jpg`;
+    
+    // Upload to GridFS
+    const uploadStream = gfs.openUploadStream(filename, {
+      metadata: {
+        originalname: req.file ? req.file.originalname : 'content-image.jpg',
+        contentType: 'image/jpeg'
+      }
+    });
+
+    // Handle upload errors
+    uploadStream.on('error', (error) => {
+      console.error('GridFS upload error:', error);
+      res.status(500).json({ message: 'Error saving image' });
+    });
+
+    // Return success response when upload completes
+    uploadStream.on('finish', () => {
+      res.json({
+        fileId: uploadStream.id.toString(),
+        url: `/api/images/${uploadStream.id.toString()}`
+      });
+    });
+
+    // Write the optimized buffer to GridFS
+    uploadStream.end(optimizedBuffer);
+
+  } catch (error) {
+    console.error('Image processing error:', error);
+    res.status(500).json({ 
+      message: 'Error processing image',
+      error: error.message 
+    });
+  }
 });
 
-app.get('/api/images/:fileId', (req, res) => {
+app.get('/api/images/:fileId', async (req, res) => {
   try {
     const downloadStream = gfs.openDownloadStream(new mongoose.Types.ObjectId(req.params.fileId));
-    downloadStream.on('error', () => {
-      return res.status(404).json({ message: 'Image not found' });
+    
+    res.set({
+      'Cache-Control': 'public, max-age=31536000',
+      'Content-Type': 'image/jpeg'
     });
-    res.set('Content-Type', 'application/octet-stream');
+
+    downloadStream.on('error', () => {
+      res.status(404).json({ message: 'Image not found' });
+    });
+
     downloadStream.pipe(res);
   } catch (err) {
     res.status(500).json({ message: 'Error retrieving image' });
